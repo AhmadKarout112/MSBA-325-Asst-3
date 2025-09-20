@@ -1,151 +1,172 @@
-import streamlit as st
+# Streamlit App: Animated Tourism Visualizations
+import plotly.express as px
 import pandas as pd
-import math
-from pathlib import Path
+import streamlit as st
+import numpy as np
 
-# Set the title and favicon that appear in the Browser's tab bar.
-st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
+# Load your data (adjust path as needed)
+df = pd.read_csv('data/551015b5649368dd2612f795c2a9c2d8_20240902_115953.csv')
+
+# Clean and rename columns for clarity
+new_column_names = {
+	'Existence of initiatives and projects in the past five years to improve the tourism sector - exists': 'Initiatives Exist',
+	'Existence of cafes - does not exist': 'No Cafes',
+	'Tourism Index': 'Tourism Index',
+	'Existence of touristic attractions that can be expolited and developed - does not exist': 'No Touristic Attractions',
+	'Existence of touristic attractions prone to be exploited and developed - exists': 'Touristic Attractions Exist',
+	'Total number of hotels': 'Total Hotels',
+	'Town': 'Town',
+	'Total number of cafes': 'Total Cafes',
+	'Observation URI': 'Observation URI',
+	'Existence of hotels - does not exist': 'No Hotels',
+	'Existence of restaurants - does not exist': 'No Restaurants',
+	'Existence of cafes - exists': 'Cafes Exist',
+	'references': 'references',
+	'Existence of hotels - exists': 'Hotels Exist',
+	'refArea': 'refArea',
+	'Total number of guest houses': 'Total Guest Houses',
+	'Total number of restaurants': 'Total Restaurants',
+	'publisher': 'publisher',
+	'dataset': 'dataset',
+	'Existence of guest houses - exists': 'Guest Houses Exist',
+	'Existence of guest houses - does not exist': 'No Guest Houses',
+	'Existence of restaurants - exists': 'Restaurants Exist'
+}
+df.rename(columns=new_column_names, inplace=True)
+
+# Clean up the 'refArea' column
+df['refArea'] = df['refArea'].str.replace('https://dbpedia.org/page/', '', regex=False)
+df['refArea'] = df['refArea'].str.replace('http://dbpedia.org/resource/', '', regex=False)
+df['refArea'] = df['refArea'].str.replace('Miniyehâ\x80\x93Danniyeh_District', 'Miniyha', regex=False)
+
+# Preprocess Governorate column (after cleaning refArea)
+df['Governorate'] = df['refArea'].str.replace('_Governorate|_District.*', '', regex=True)
+df['Governorate'] = df['Governorate'].str.replace('_', ' ')
+
+# Calculate total amenities using new column names after renaming
+df['Total_Amenities'] = (
+	df['Total Hotels'].fillna(0) +
+	df['Total Restaurants'].fillna(0) +
+	df['Total Cafes'].fillna(0) +
+	df['Total Guest Houses'].fillna(0)
 )
 
-# -----------------------------------------------------------------------------
-# Declare some useful functions.
+# Streamlit App Title
+st.title('Lebanon Tourism Data Visualizations')
 
-@st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
+# Add filters
+st.sidebar.header('Filters')
+gov_options = ['All'] + sorted(df['Governorate'].dropna().unique().tolist())
+selected_govs = st.sidebar.multiselect('Filter by Governorate(s)', gov_options, default=['All'])
 
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
-    """
+# Filter towns based on selected governorates
+if 'All' in selected_govs or len(selected_govs) == 0:
+    available_towns = sorted(df['Town'].dropna().unique().tolist())
+else:
+    available_towns = sorted(df[df['Governorate'].isin(selected_govs)]['Town'].dropna().unique().tolist())
 
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
+town_options = ['All'] + available_towns
+selected_towns = st.sidebar.multiselect('Filter by Town(s)', town_options, default=['All'])
 
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
+# Filter dataframe based on selections
+filtered_df = df.copy()
+if 'All' not in selected_govs and len(selected_govs) > 0:
+    filtered_df = filtered_df[filtered_df['Governorate'].isin(selected_govs)]
+if 'All' not in selected_towns and len(selected_towns) > 0:
+    filtered_df = filtered_df[filtered_df['Town'].isin(selected_towns)]
 
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
-    )
-
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
-
-    return gdp_df
-
-gdp_df = get_gdp_data()
-
-# -----------------------------------------------------------------------------
-# Draw the actual page
-
-# Set the title that appears at the top of the page.
-'''
-# :earth_americas: GDP dashboard
-
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
-'''
-
-# Add some spacing
-''
-''
-
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
-
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
-
-countries = gdp_df['Country Code'].unique()
-
-if not len(countries):
-    st.warning("Select at least one country")
-
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
-
-''
-''
-''
-
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
-
-st.header('GDP over time', divider='gray')
-
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
+# Create Tourism Ecosystem Score
+filtered_df['Tourism_Ecosystem_Score'] = (
+    (filtered_df['Total Hotels'] > 0).astype(int) +
+    (filtered_df['Total Restaurants'] > 0).astype(int) +
+    (filtered_df['Total Cafes'] > 0).astype(int) +
+    (filtered_df['Total Guest Houses'] > 0).astype(int) +
+    filtered_df['Initiatives Exist'] +
+    filtered_df['Touristic Attractions Exist']
 )
 
-''
-''
+# 1. Tourism Infrastructure Composition by Governorate (Stacked Bar Chart)
+st.subheader('Tourism Infrastructure by Governorate')
 
+# Aggregate data by governorate
+gov_infrastructure = filtered_df.groupby('Governorate').agg({
+    'Total Hotels': 'sum',
+    'Total Restaurants': 'sum', 
+    'Total Cafes': 'sum',
+    'Total Guest Houses': 'sum'
+}).reset_index()
 
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
+# Create stacked bar chart
+fig1 = px.bar(
+    gov_infrastructure,
+    x='Governorate',
+    y=['Total Hotels', 'Total Restaurants', 'Total Cafes', 'Total Guest Houses'],
+    title='Tourism Infrastructure Distribution',
+    labels={'value': 'Number of Facilities', 'variable': 'Facility Type'},
+    color_discrete_map={
+        'Total Hotels': '#1f77b4',
+        'Total Restaurants': '#ff7f0e', 
+        'Total Cafes': '#2ca02c',
+        'Total Guest Houses': '#d62728'
+    }
+)
+fig1.update_layout(
+    xaxis_title='Governorate',
+    yaxis_title='Number of Tourism Facilities',
+    xaxis_tickangle=-45,
+    height=500,
+    barmode='stack'
+)
+st.plotly_chart(fig1, use_container_width=True)
 
-st.header(f'GDP in {to_year}', divider='gray')
+# 2. Tourism Service Availability Heatmap
+st.subheader('Tourism Service Availability by Governorate')
 
-''
+# Calculate service availability percentages
+service_availability = filtered_df.groupby('Governorate').agg({
+    'Hotels Exist': 'mean',
+    'Restaurants Exist': 'mean',
+    'Cafes Exist': 'mean',
+    'Guest Houses Exist': 'mean',
+    'Touristic Attractions Exist': 'mean',
+    'Initiatives Exist': 'mean'
+}).round(3) * 100  # Convert to percentages
 
-cols = st.columns(4)
+service_availability = service_availability.reset_index()
 
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
+# Melt data for heatmap
+service_melted = service_availability.melt(
+    id_vars=['Governorate'], 
+    var_name='Service Type',
+    value_name='Availability Percentage'
+)
 
-    with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
+# Create heatmap
+fig2 = px.imshow(
+    service_availability.set_index('Governorate').T,
+    labels=dict(x="Governorate", y="Service Type", color="Availability %"),
+    title="Tourism Service Availability Heatmap (%)",
+    color_continuous_scale='RdYlGn',
+    aspect='auto'
+)
 
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
-        else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
+fig2.update_layout(
+    height=500,
+    xaxis_tickangle=-45
+)
 
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
+# Add text annotations
+for i, gov in enumerate(service_availability['Governorate']):
+    for j, service in enumerate(['Hotels Exist', 'Restaurants Exist', 'Cafes Exist', 
+                               'Guest Houses Exist', 'Touristic Attractions Exist', 'Initiatives Exist']):
+        value = service_availability.loc[service_availability['Governorate'] == gov, service].iloc[0]
+        fig2.add_annotation(
+            x=i, y=j,
+            text=f"{value:.1f}%",
+            showarrow=False,
+            font=dict(color="white" if value < 50 else "black", size=8)
         )
+
+st.plotly_chart(fig2, use_container_width=True)
+
+
