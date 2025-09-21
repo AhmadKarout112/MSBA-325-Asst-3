@@ -54,26 +54,16 @@ df['Total_Amenities'] = (
 # Streamlit App Title
 st.title('Lebanon Tourism Data Visualizations')
 
-# Add filters
+
+# Add filter for governorate only
 st.sidebar.header('Filters')
 gov_options = ['All'] + sorted(df['Governorate'].dropna().unique().tolist())
 selected_govs = st.sidebar.multiselect('Filter by Governorate(s)', gov_options, default=['All'])
 
-# Filter towns based on selected governorates
-if 'All' in selected_govs or len(selected_govs) == 0:
-    available_towns = sorted(df['Town'].dropna().unique().tolist())
-else:
-    available_towns = sorted(df[df['Governorate'].isin(selected_govs)]['Town'].dropna().unique().tolist())
-
-town_options = ['All'] + available_towns
-selected_towns = st.sidebar.multiselect('Filter by Town(s)', town_options, default=['All'])
-
-# Filter dataframe based on selections
+# Filter dataframe based on governorate selection only
 filtered_df = df.copy()
 if 'All' not in selected_govs and len(selected_govs) > 0:
     filtered_df = filtered_df[filtered_df['Governorate'].isin(selected_govs)]
-if 'All' not in selected_towns and len(selected_towns) > 0:
-    filtered_df = filtered_df[filtered_df['Town'].isin(selected_towns)]
 
 # Create Tourism Ecosystem Score
 filtered_df['Tourism_Ecosystem_Score'] = (
@@ -119,54 +109,39 @@ fig1.update_layout(
 )
 st.plotly_chart(fig1, use_container_width=True)
 
-# 2. Tourism Service Availability Heatmap
-st.subheader('Tourism Service Availability by Governorate')
 
-# Calculate service availability percentages
-service_availability = filtered_df.groupby('Governorate').agg({
-    'Hotels Exist': 'mean',
-    'Restaurants Exist': 'mean',
-    'Cafes Exist': 'mean',
-    'Guest Houses Exist': 'mean',
-    'Touristic Attractions Exist': 'mean',
-    'Initiatives Exist': 'mean'
-}).round(3) * 100  # Convert to percentages
 
-service_availability = service_availability.reset_index()
 
-# Melt data for heatmap
-service_melted = service_availability.melt(
-    id_vars=['Governorate'], 
-    var_name='Service Type',
-    value_name='Availability Percentage'
+# 2. Initiatives vs Governorate (Grouped Bar Chart: Count Only)
+import plotly.graph_objects as go
+
+st.subheader('Towns With vs Without Initiatives by Governorate')
+
+# Count of towns by governorate and initiatives status
+initiatives_gov = filtered_df.groupby(['Governorate', 'Initiatives Exist']).size().reset_index(name='Town Count')
+initiatives_gov['Initiatives Status'] = initiatives_gov['Initiatives Exist'].map({0: 'No Initiatives', 1: 'Has Initiatives'})
+
+fig_gov = go.Figure()
+colors = ['#FF6B6B', '#4ECDC4']
+
+for i, status_label in enumerate(['No Initiatives', 'Has Initiatives']):
+    subset = initiatives_gov[initiatives_gov['Initiatives Status'] == status_label]
+    fig_gov.add_trace(go.Bar(
+        name=status_label,
+        x=subset['Governorate'],
+        y=subset['Town Count'],
+        marker_color=colors[i],
+        offsetgroup=i,
+        legendgroup=status_label
+    ))
+
+fig_gov.update_layout(
+    title='Number of Towns With vs Without Initiatives by Governorate',
+    xaxis_title='Governorate',
+    yaxis_title='Number of Towns',
+    barmode='group',
+    height=500
 )
 
-# Create heatmap
-fig2 = px.imshow(
-    service_availability.set_index('Governorate').T,
-    labels=dict(x="Governorate", y="Service Type", color="Availability %"),
-    title="Tourism Service Availability Heatmap (%)",
-    color_continuous_scale='RdYlGn',
-    aspect='auto'
-)
-
-fig2.update_layout(
-    height=500,
-    xaxis_tickangle=-45
-)
-
-# Add text annotations
-for i, gov in enumerate(service_availability['Governorate']):
-    for j, service in enumerate(['Hotels Exist', 'Restaurants Exist', 'Cafes Exist', 
-                               'Guest Houses Exist', 'Touristic Attractions Exist', 'Initiatives Exist']):
-        value = service_availability.loc[service_availability['Governorate'] == gov, service].iloc[0]
-        fig2.add_annotation(
-            x=i, y=j,
-            text=f"{value:.1f}%",
-            showarrow=False,
-            font=dict(color="white" if value < 50 else "black", size=8)
-        )
-
-st.plotly_chart(fig2, use_container_width=True)
-
+st.plotly_chart(fig_gov, use_container_width=True)
 
